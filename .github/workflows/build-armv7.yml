@@ -1,0 +1,82 @@
+name: Build and Push ARMv7 Docker Image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-armv7:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.25"
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Build ARMv7 binaries
+        run: |
+          go mod tidy
+          pnpm --prefix webui install
+          GOOS=linux BACKREST_BUILD_VERSION=dev go generate ./...
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "-s -w" -o backrest ./cmd/backrest
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "-s -w" -o docker-entrypoint ./cmd/docker-entrypoint
+
+      - name: Build and push ARMv7 Alpine Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.alpine
+          platforms: linux/arm/v7
+          push: true
+          tags: ghcr.io/${{ github.repository }}:armv7-alpine-temp
+
+      - name: Build and push ARMv7 Scratch Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.scratch
+          platforms: linux/arm/v7
+          push: true
+          tags: ghcr.io/${{ github.repository }}:armv7-scratch-temp
+
+      - name: Print pull instructions
+        run: |
+          echo "============================================"
+          echo "ARMv7 Docker images published to GHCR!"
+          echo ""
+          echo "Pull the Alpine image:"
+          echo "  docker pull ghcr.io/${{ github.repository }}:armv7-alpine-temp"
+          echo ""
+          echo "Pull the Scratch image:"
+          echo "  docker pull ghcr.io/${{ github.repository }}:armv7-scratch-temp"
+          echo ""
+          echo "These are temporary images for one-off use."
+          echo "============================================"
